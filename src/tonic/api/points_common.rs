@@ -528,6 +528,7 @@ pub async fn search(
         vector_name,
         with_vectors,
         read_consistency,
+        aggregate_function
     } = search_points;
 
     let search_request = SearchRequest {
@@ -546,6 +547,7 @@ pub async fn search(
                 .unwrap_or_default(),
         ),
         score_threshold,
+        aggregate_function: aggregate_function.map(|af| af.function)
     };
 
     let read_consistency = ReadConsistency::try_from_optional(read_consistency)?;
@@ -868,6 +870,7 @@ pub async fn get(
         with_payload,
         with_vectors,
         read_consistency,
+        ..
     } = get_points;
 
     let point_request = PointRequest {

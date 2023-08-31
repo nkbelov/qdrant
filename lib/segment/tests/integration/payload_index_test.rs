@@ -644,6 +644,7 @@ fn test_struct_payload_index_nested_fields() {
                 &WithPayload {
                     enable: true,
                     payload_selector: None,
+                    aggregate_keys: vec![]
                 },
                 &false.into(),
                 Some(&query_filter),
@@ -658,6 +659,7 @@ fn test_struct_payload_index_nested_fields() {
                 &WithPayload {
                     enable: true,
                     payload_selector: None,
+                    aggregate_keys: vec![]
                 },
                 &false.into(),
                 Some(&query_filter),

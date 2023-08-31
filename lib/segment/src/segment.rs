@@ -31,7 +31,7 @@ use crate::telemetry::SegmentTelemetry;
 use crate::types::{
     Filter, Payload, PayloadFieldSchema, PayloadIndexInfo, PayloadKeyType, PayloadKeyTypeRef,
     PayloadSchemaType, PointIdType, PointOffsetType, ScoredPoint, SearchParams, SegmentConfig,
-    SegmentInfo, SegmentState, SegmentType, SeqNumberType, WithPayload, WithVector,
+    SegmentInfo, SegmentState, SegmentType, SeqNumberType, WithPayload, WithVector, PayloadContainer,
 };
 use crate::utils;
 use crate::utils::fs::find_symlink;
@@ -532,6 +532,7 @@ impl Segment {
         internal_result: &[ScoredPointOffset],
         with_payload: &WithPayload,
         with_vector: &WithVector,
+        aggregate_params: &[PayloadKeyType]
     ) -> OperationResult<Vec<ScoredPoint>> {
         let id_tracker = self.id_tracker.borrow();
         internal_result
@@ -557,17 +558,33 @@ impl Segment {
                         "Corrupter id_tracker, no version for point {point_id}"
                     ))
                 })?;
-                let payload = if with_payload.enable {
+
+                let (payload, aggr_args) = if with_payload.enable || !aggregate_params.is_empty() {
                     let initial_payload = self.payload_by_offset(point_offset)?;
+
+                    let aggr_args = if !aggregate_params.is_empty() {
+                        let params = aggregate_params.iter()
+                        .map(|path| {
+                            initial_payload.get_value(path).values().into_iter().cloned().collect()
+                        })
+                        .collect();
+                    
+                        Some(params)
+                    } else {
+                        None
+                    };
+                    
                     let processed_payload = if let Some(i) = &with_payload.payload_selector {
                         i.process(initial_payload)
                     } else {
                         initial_payload
                     };
-                    Some(processed_payload)
+
+                    (Some(processed_payload), aggr_args)
                 } else {
-                    None
+                    (None, None)
                 };
+
                 let vector = match with_vector {
                     WithVector::Bool(false) => None,
                     WithVector::Bool(true) => {
@@ -592,6 +609,7 @@ impl Segment {
                     score: scored_point_offset.score,
                     payload,
                     vector,
+                    aggregate_args: aggr_args
                 })
             })
             .collect()
@@ -734,6 +752,7 @@ impl SegmentEntry for Segment {
         vector: &[VectorElementType],
         with_payload: &WithPayload,
         with_vector: &WithVector,
+        aggregate_params: &[PayloadKeyType],
         filter: Option<&Filter>,
         top: usize,
         params: Option<&SearchParams>,
@@ -746,7 +765,7 @@ impl SegmentEntry for Segment {
                 .borrow()
                 .search(&[vector], filter, top, params)[0];
 
-        self.process_search_result(internal_result, with_payload, with_vector)
+        self.process_search_result(internal_result, with_payload, with_vector, aggregate_params)
     }
 
     fn search_batch(
@@ -755,6 +774,7 @@ impl SegmentEntry for Segment {
         vectors: &[&[VectorElementType]],
         with_payload: &WithPayload,
         with_vector: &WithVector,
+        aggregate_params: &[PayloadKeyType],
         filter: Option<&Filter>,
         top: usize,
         params: Option<&SearchParams>,
@@ -769,7 +789,7 @@ impl SegmentEntry for Segment {
         let res = internal_results
             .iter()
             .map(|internal_result| {
-                self.process_search_result(internal_result, with_payload, with_vector)
+                self.process_search_result(internal_result, with_payload, with_vector, aggregate_params)
             })
             .collect();
 
@@ -1564,6 +1584,7 @@ mod tests {
                 &query_vector,
                 &WithPayload::default(),
                 &false.into(),
+                &[],
                 None,
                 10,
                 None,
@@ -1577,6 +1598,7 @@ mod tests {
                 &[&query_vector],
                 &WithPayload::default(),
                 &false.into(),
+                &[],
                 None,
                 10,
                 None,
@@ -1657,6 +1679,7 @@ mod tests {
                 &[1.0, 1.0],
                 &WithPayload::default(),
                 &false.into(),
+                &[],
                 Some(&filter_valid),
                 1,
                 None,
@@ -1670,6 +1693,7 @@ mod tests {
                 &[1.0, 1.0],
                 &WithPayload::default(),
                 &false.into(),
+                &[],
                 Some(&filter_invalid),
                 1,
                 None,
@@ -1847,6 +1871,7 @@ mod tests {
                 &query_vector,
                 &WithPayload::default(),
                 &false.into(),
+                &[],
                 None,
                 10,
                 None,
@@ -1873,6 +1898,7 @@ mod tests {
                 &query_vector,
                 &WithPayload::default(),
                 &false.into(),
+                &[],
                 None,
                 10,
                 None,
@@ -2159,6 +2185,7 @@ mod tests {
                         payload_selector: None,
                     },
                     &WithVector::Bool(true),
+                    &[],
                     None,
                     1,
                     None,
@@ -2174,6 +2201,7 @@ mod tests {
                         payload_selector: None,
                     },
                     &WithVector::Bool(true),
+                    &[],
                     None,
                     1,
                     None,

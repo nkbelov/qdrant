@@ -9,11 +9,12 @@ use segment::data_types::vectors::VectorElementType;
 use segment::entry::entry_point::OperationError;
 use segment::types::{
     Filter, Indexes, PointIdType, ScoreType, ScoredPoint, SearchParams, SegmentConfig,
-    SeqNumberType, WithPayload, WithPayloadInterface, WithVector,
+    SeqNumberType, WithPayload, WithPayloadInterface, WithVector, PayloadKeyType,
 };
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 
+use crate::aggregate_fn::AggregateFn;
 use crate::collection_manager::holders::segment_holder::{LockedSegment, SegmentHolder};
 use crate::collection_manager::probabilistic_segment_search_sampling::find_search_sampling_over_point_distribution;
 use crate::collection_manager::search_result_aggregator::BatchResultAggregator;
@@ -296,6 +297,7 @@ impl SegmentsSearcher {
                                 Some(selected_vectors.into())
                             }
                         },
+                        aggregate_args: Some(vec![])
                     },
                 );
                 point_version.insert(id, version);
@@ -312,6 +314,7 @@ struct BatchSearchParams<'a> {
     pub filter: Option<&'a Filter>,
     pub with_payload: WithPayload,
     pub with_vector: WithVector,
+    pub aggregate_params: Vec<PayloadKeyType>,
     pub top: usize,
     pub params: Option<&'a SearchParams>,
 }
@@ -375,11 +378,17 @@ fn search_in_segment(
             .as_ref()
             .unwrap_or(&WithPayloadInterface::Bool(false));
 
+        let aggregate_params = search_query
+            .aggregate_function
+            .as_ref()
+            .map_or(vec![], |f| AggregateFn::extract_params(f));
+
         let params = BatchSearchParams {
             vector_name: search_query.vector.get_name(),
             filter: search_query.filter.as_ref(),
             with_payload: WithPayload::from(with_payload_interface),
             with_vector: search_query.with_vector.clone().unwrap_or_default(),
+            aggregate_params,
             top: search_query.limit + search_query.offset,
             params: search_query.params.as_ref(),
         };
@@ -408,6 +417,7 @@ fn search_in_segment(
                     &vectors_batch,
                     &prev_params.with_payload,
                     &prev_params.with_vector,
+                    &prev_params.aggregate_params,
                     prev_params.filter,
                     top,
                     prev_params.params,
@@ -444,6 +454,7 @@ fn search_in_segment(
             &vectors_batch,
             &prev_params.with_payload,
             &prev_params.with_vector,
+            &prev_params.aggregate_params,
             prev_params.filter,
             top,
             prev_params.params,
@@ -497,6 +508,7 @@ mod tests {
             limit: 5,
             score_threshold: None,
             offset: 0,
+            aggregate_function: None
         };
 
         let batch_request = SearchRequestBatch {
@@ -549,6 +561,7 @@ mod tests {
                 filter: None,
                 params: None,
                 score_threshold: None,
+                aggregate_function: None
             };
             let req2 = SearchRequest {
                 vector: random_vector(&mut rnd, 4).into(),
@@ -559,6 +572,7 @@ mod tests {
                 with_payload: None,
                 with_vector: None,
                 score_threshold: None,
+                aggregate_function: None
             };
 
             let batch_request = SearchRequestBatch {
